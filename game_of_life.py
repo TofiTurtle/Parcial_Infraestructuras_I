@@ -11,14 +11,15 @@ def generar_matriz_aleatoria(dim):
 
 # implementacion secuencial
 
-def survives_seq(m):
+def survives_seq(m,m_aux):
     # Recorremos la matriz
     for i in range(len(m)):
         for j in range(len(m)):
             # Conteo de vecinos vivos, llamamos a conteo_vecinos
-            vecinos = conteo_vecinos(m,i,j)
-            if vecinos != 2 and vecinos != 3:
-                m[i][j] = 0
+            if m[i][j] == 1:
+                vecinos = conteo_vecinos(m,i,j)
+                if vecinos != 2 and vecinos != 3:
+                    m_aux[i][j] = 0
             
 def conteo_vecinos(m, i, j):
     cont = 0
@@ -42,14 +43,14 @@ def conteo_vecinos(m, i, j):
     
     
 
-def revives_seq(m):
+def revives_seq(m,m_aux):
     for i in range(len(m)):
         for j in range(len(m)):
             # Conteo de vecinos vivos, llamamos a conteo_vecinos
             if m[i][j] == 0:
                 vecinos = conteo_vecinos(m,i,j)
                 if vecinos == 3:
-                    m[i][j] = 1
+                    m_aux[i][j] = 1
                         
 
             
@@ -72,12 +73,36 @@ def imprimir_matriz(matriz):
 
 # Archivo de ejecucion principal Main
 if __name__ == '__main__':
+    survivors = []
+    revivers = []
+
+
     m1 = generar_matriz_aleatoria(4)
+    # copiamos la matriz base a la matriz auxiliar
+    m_aux = [fila[:] for fila in m1]
+
+    #iteracin 1:
     imprimir_matriz(m1)
 
+    #iteracion 2:
     print("ITERACION 2")
-    survives_seq(m1)
-    revives_seq(m1)
+    survives_seq(m1, m_aux)
+    revives_seq(m1, m_aux)
+    m1 = [fila[:] for fila in m_aux]
+    imprimir_matriz(m1)
+
+    #iteracion 3:
+    print("ITERACION 3")
+    survives_seq(m1, m_aux)
+    revives_seq(m1, m_aux)
+    m1 = [fila[:] for fila in m_aux]
     imprimir_matriz(m1)
     
+    #iteracion 4:
+    print("ITERACION 2")
+    survives_seq(m1, m_aux)
+    revives_seq(m1, m_aux)
+    m1 = [fila[:] for fila in m_aux]
+    imprimir_matriz(m1)
+     
     print("flip")
