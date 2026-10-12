@@ -1,4 +1,67 @@
+# importaciones
+import random
+
 #Funciones del programa
+
+def generar_matriz_aleatoria(dim):
+    m = [[random.randint(0,1) # generada con numeros aleatorios entre 1 y 100
+          for _ in range(dim)] 
+          for _ in range(dim)]
+    return m
+
+# implementacion secuencial
+
+def survives_seq(m):
+    # Recorremos la matriz
+    for i in range(len(m)):
+        for j in range(len(m)):
+            # Conteo de vecinos vivos, llamamos a conteo_vecinos
+            vecinos = conteo_vecinos(m,i,j)
+            if vecinos != 2 and vecinos != 3:
+                m[i][j] = 0
+            
+def conteo_vecinos(m, i, j):
+    cont = 0
+
+    # Ciclos para recorrer los vecinos proximos de caada celula
+    for di in (-1, 0, 1):
+        for dj in (-1, 0, 1):
+            # ignoramos la posicion actual (la misma celula no se cuenta)
+            if di == 0 and dj == 0:
+                continue  
+            
+            fila = i + di
+            columna = j + dj
+
+            # Hacemos validacion para que NO accedamos a posiciones fuera de rango de la matriz
+            if 0 <= fila < len(m) and 0 <= columna < len(m):
+                if m[fila][columna] == 1:   
+                    cont += 1
+
+    return cont
+    
+    
+
+def revives_seq(m):
+    for i in range(len(m)):
+        for j in range(len(m)):
+            # Conteo de vecinos vivos, llamamos a conteo_vecinos
+            if m[i][j] == 0:
+                vecinos = conteo_vecinos(m,i,j)
+                if vecinos == 3:
+                    m[i][j] = 1
+                        
+
+            
+
+
+def imprimir_matriz(matriz):
+    for fila in matriz:
+        # Convierte cada número a texto y los une con un espacio
+        print(" ".join(map(str, fila)))
+
+
+
 
 #Desarrollo Secuencial del programa
 
@@ -7,9 +70,14 @@
 
 
 
-
-
-
 # Archivo de ejecucion principal Main
 if __name__ == '__main__':
+    m1 = generar_matriz_aleatoria(4)
+    imprimir_matriz(m1)
+
+    print("ITERACION 2")
+    survives_seq(m1)
+    revives_seq(m1)
+    imprimir_matriz(m1)
+    
     print("flip")
