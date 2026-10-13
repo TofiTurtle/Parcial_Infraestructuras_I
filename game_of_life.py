@@ -1,303 +1,228 @@
-"""
-Cómo ejecutarlo:
-    python vida_secuencial.py              -> abre la interfaz gráfica
-    python vida_secuencial.py benchmark    -> mide tiempos (sin interfaz)
-"""
-
 import random
-import sys
+# importaciones necesarias para graficacion
+import numpy as np
 import time
-import tkinter as tk
+import pygame
+# importaciones de threading
+
 
 # 1. CONFIGURACIÓN 
 
-FILAS = 40              # Número de filas de la matriz (para la interfaz)
-COLUMNAS = 40           # Número de columnas de la matriz (para la interfaz)
-TAM_CELDA = 15          # Tamaño en píxeles de cada celda 
-VELOCIDAD_MS = 100      # Milisegundos entre generaciones en la interfaz
-PROB_VIVA = 0.25        # Probabilidad de que una celda nazca viva al azar
+# *************** Funciones generales del programa, que ambas versiones utilizan para su ejecucion ***************
 
-COLOR_VIVA = "black"
-COLOR_MUERTA = "white"
+# Funcion de generar matriz aleatoria, se genera de manera tradicional
+# Esta recibe una dimension predeterminada, y genera la matriz con los valores 1 o 0
+def generar_matriz_aleatoria(dim):
+    m = [[random.randint(0,1) 
+          for _ in range(dim)] 
+          for _ in range(dim)]
+    return m
 
-VIVA = 1                # Representamos una célula viva con 1
-MUERTA = 0              # Representamos una célula muerta con 0
+# Funcion imprimir matriz, usada para hacer diversos testeos de correctitud desde la terminal.
+# Recibe una matriz y la imprime de una forma legible.
+def imprimir_matriz(matriz):
+    for fila in matriz:
+        # Convierte cada número a texto y los une con un espacio
+        print(" ".join(map(str, fila)))
 
 # 2. LÓGICA DEL JUEGO 
 
-def crear_matriz_vacia(filas, columnas):
-    """Crea una matriz de filas x columnas con todas las células muertas."""
-    return [[MUERTA] * columnas for _ in range(filas)]
+#****************************** ImplementacionInterfaz grafica con pygame ******************************
+TAM_VENTANA = 800  # lado en píxeles de la ventana, sin importar el tamaño de la matriz
+COLOR_MUERTA = (18, 18, 18)
+COLOR_VIVA = (0, 230, 118)
+PALETA = np.array([COLOR_MUERTA, COLOR_VIVA], dtype=np.uint8)
+ 
+# Teclas que avanzan al siguiente estado
+TECLAS_AVANCE = (pygame.K_SPACE, pygame.K_PAUSE, pygame.K_RETURN, pygame.K_KP_ENTER)
+RETARDO_REPETICION = 0.3   # segundos que hay que mantener la tecla antes de que avance solo
+INTERVALO_REPETICION = 0.05  # segundos mínimos entre generaciones mientras se mantiene
+ 
+ 
+def matriz_a_superficie(m):
+    """Convierte la matriz (lista de listas de 0/1) en una superficie de pygame."""
+    arr = np.array(m, dtype=np.uint8)
+    rgb = PALETA[arr]                      # (filas, columnas, 3)
+    rgb = rgb.swapaxes(0, 1)               # pygame espera (x, y, 3)
+    superficie = pygame.surfarray.make_surface(rgb)
+    # scale (vecino más cercano) mantiene los colores puros, sin mezclar celdas
+    return pygame.transform.scale(superficie, (TAM_VENTANA, TAM_VENTANA))
+ 
+ 
+def titulo(n, generacion, tiempo_calculo=None):
+    texto = (f"Juego de la vida {n}x{n} - Generación {generacion}"
+             f" | Espacio/Enter/Pausa: avanzar (mantener = continuo), Esc: salir")
+    if tiempo_calculo is not None:
+        texto += f" | último cálculo: {tiempo_calculo:.2f}s"
+    return texto
+ 
+ 
+def ejecutar(dim):
+    print(f"Generando matriz {dim}x{dim}...")
+    m1 = generar_matriz_aleatoria(dim)
+    # copiamos la matriz base a la matriz auxiliar
+    m_aux = [fila[:] for fila in m1]
+    generacion = 1
+ 
+    pygame.init()
+    pantalla = pygame.display.set_mode((TAM_VENTANA, TAM_VENTANA))
+    reloj = pygame.time.Clock()
+ 
+    imagen = matriz_a_superficie(m1)
+    pygame.display.set_caption(titulo(dim, generacion))
+ 
+    t_inicio_pulsacion = 0.0
+    t_ultimo_paso = 0.0
+ 
+    corriendo = True
+    while corriendo:
+        ahora = time.perf_counter()
+        avanzar = False
+ 
+        for evento in pygame.event.get():
+            if evento.type == pygame.QUIT:
+                corriendo = False
+            elif evento.type == pygame.KEYDOWN:
+                if evento.key == pygame.K_ESCAPE:
+                    corriendo = False
+                elif evento.key in TECLAS_AVANCE:
+                    avanzar = True
+                    t_inicio_pulsacion = ahora
+ 
+        # Si se mantiene presionada una tecla de avance, sigue avanzando solo.
+        # Se consulta el estado de la tecla (no se encolan eventos), así que en
+        # matrices grandes no se acumulan pasos pendientes.
+        if not avanzar:
+            teclas = pygame.key.get_pressed()
+            if (any(teclas[k] for k in TECLAS_AVANCE)
+                    and ahora - t_inicio_pulsacion >= RETARDO_REPETICION
+                    and ahora - t_ultimo_paso >= INTERVALO_REPETICION):
+                avanzar = True
+ 
+        if avanzar and corriendo:
+            pygame.display.set_caption(f"Calculando generación {generacion + 1}...")
+            pygame.event.pump()
+ 
+            t0 = time.perf_counter()
+            survives_seq(m1, m_aux)
+            revives_seq(m1, m_aux)
+            m1 = [fila[:] for fila in m_aux]
+            t = time.perf_counter() - t0
+ 
+            generacion += 1
+            imagen = matriz_a_superficie(m1)
+            pygame.display.set_caption(titulo(dim, generacion, t))
+            t_ultimo_paso = time.perf_counter()
+ 
+        pantalla.blit(imagen, (0, 0))
+        pygame.display.flip()
+        reloj.tick(30)
+ 
+    pygame.quit() 
 
 
-def crear_matriz_aleatoria(filas, columnas, prob_viva=PROB_VIVA):
-    """Crea una matriz donde cada célula está viva con probabilidad prob_viva."""
-    matriz = crear_matriz_vacia(filas, columnas)
-    for f in range(filas):
-        for c in range(columnas):
-            if random.random() < prob_viva:
-                matriz[f][c] = VIVA
-    return matriz
+# Funcion conteo vecinos, esta dada una matriz m, y unas coordinadas i,j. recorre todos los vecinos proximos a la celda m[i][j]
+# esta realiza un conteo de que numero de vecinos se encuentran vivos al momento de llamarla.
+def conteo_vecinos(m, i, j):
+    #Establecemos un conteo en 0 para poder tener el acumulado de vecinos
+    cont = 0
+
+    # Ciclos para recorrer los vecinos proximos de caada celula
+    for di in (-1, 0, 1):
+        for dj in (-1, 0, 1):
+            # ignoramos la posicion actual (la misma celula no se cuenta)
+            if di == 0 and dj == 0:
+                continue  
+
+            # establecemos la coordenada de cada vecino proximo en base a las posiciones dadas i,j
+            fila = i + di
+            columna = j + dj
+
+            # Hacemos validacion para que NO accedamos a posiciones fuera de rango de la matriz
+            if 0 <= fila < len(m) and 0 <= columna < len(m):
+                if m[fila][columna] == 1: #contamos solo los elementos vivos
+                    cont += 1
+
+    return cont #devolvemos el conteo que tengamos de vecinos vivos
 
 
-def contar_vecinos_vivos(matriz, fila, col):
-    """
-    Cuenta cuántos de los 8 vecinos de la celda (fila, col) están vivos.
-
-    Los vecinos son las celdas que rodean a la celda actual:
-
-        (-1,-1) (-1, 0) (-1,+1)
-        ( 0,-1)  CELDA  ( 0,+1)
-        (+1,-1) (+1, 0) (+1,+1)
-
-    """
-    filas = len(matriz)
-    columnas = len(matriz[0])
-    vecinos_vivos = 0
-
-    # Recorremos el desplazamiento en las filas (-1, 0, +1)
-    for df in (-1, 0, 1):
-        # Y el desplazamiento en las columnas (-1, 0, +1)
-        for dc in (-1, 0, 1):
-
-            # (0, 0) es la propia celda, no es su vecina: la saltamos
-            if df == 0 and dc == 0:
-                continue
-
-            f_vecino = fila + df
-            c_vecino = col + dc
-
-            # Solo contamos si el vecino está dentro de la matriz
-            if 0 <= f_vecino < filas and 0 <= c_vecino < columnas:
-                vecinos_vivos += matriz[f_vecino][c_vecino]
-
-    return vecinos_vivos
 
 
-def siguiente_generacion(matriz):
-    """
-    Calcula la siguiente generación aplicando las reglas de Conway.
+#****************************** Implementacion secuencial del Problema ******************************
 
-    Reglas:
-      Célula viva:
-        - menos de 2 vecinos vivos  -> muere (soledad)
-        - 2 o 3 vecinos vivos       -> sobrevive
-        - más de 3 vecinos vivos    -> muere (sobrepoblación)
-      Célula muerta:
-        - exactamente 3 vecinos     -> nace
-    """
-    filas = len(matriz)
-    columnas = len(matriz[0])
-    nueva = crear_matriz_vacia(filas, columnas)
-
-    # Este doble ciclo es lo que se repartirá entre hilos/procesos
-    # en la versión paralela (por ejemplo, dando bloques de filas a cada uno).
-    for f in range(filas):
-        for c in range(columnas):
-            vecinos = contar_vecinos_vivos(matriz, f, c)
-
-            if matriz[f][c] == VIVA:
-                # Regla de la célula viva: sobrevive con 2 o 3 vecinos
-                if vecinos == 2 or vecinos == 3:
-                    nueva[f][c] = VIVA
-                # En cualquier otro caso queda en MUERTA (ya es 0 por defecto)
-            else:
-                # Regla de la célula muerta: nace con exactamente 3 vecinos
-                if vecinos == 3:
-                    nueva[f][c] = VIVA
-
-    return nueva
+# funcion que revisa para cada elemento de la matriz, si sobrevive o muere en cada iteracion que se llama en base al numero
+# de vecinos a su alrededor, usando conteo_vecinos. Esta recibe una matriz sobre la cual aplica esta logica, y ademas una matriz auxiliar
+# m_aux para ir almacenando el nuevo estado de la partida sin modificar la logica de la iteracion actual.
+def survives_seq(m,m_aux):
+    # Recorremos la matriz
+    for i in range(len(m)):
+        for j in range(len(m)):
+            # Conteo de vecinos vivos, llamamos a conteo_vecinos
+            if m[i][j] == 1: #primero verificamos que estemos en una celula viva
+                vecinos = conteo_vecinos(m,i,j) # contamos sus vecinos vivos
+                if vecinos != 2 and vecinos != 3: # si no son ni 2 ni 3 se muere.
+                    m_aux[i][j] = 0 #almacenamos este nuevo estado de celda en la matriz auxiliar
+            
+# Funcion revivir. Esta revisa para cada celula muerta si cuenta con la cantidad exacta de vecinos necesarios para revivir en la proxima 
+# iteracion. Esta recibe una matriz sobre la cual aplica esta logica, y ademas una matriz auxiliar m_aux para ir almacenando el nuevo
+# estado de la partida sin modificar la logica de la iteracion actual.
+def revives_seq(m,m_aux):
+    # Recorremos la matriz
+    for i in range(len(m)):
+        for j in range(len(m)):
+            # Conteo de vecinos vivos, llamamos a conteo_vecinos
+            if m[i][j] == 0: # primero verificamos que estemos en una celula muerta
+                vecinos = conteo_vecinos(m,i,j) # contamos sus vecinos vivos
+                if vecinos == 3: # comprobamos que tenga EXACTAMENTE 3 vecinos vivos
+                    m_aux[i][j] = 1 #almacenamos este nuevo estado de la celda en la matriz auxiliar
+                        
 
 
-# ======================================================================
-# 3. BENCHMARK (medición de tiempos para el análisis de rendimiento)
-# ======================================================================
-
-def medir_tiempo(tamano, generaciones):
-    """
-    Ejecuta `generaciones` pasos sobre una matriz de tamano x tamano
-    y devuelve el tiempo total en segundos.
-    """
-    random.seed(67)  # Semilla fija: así todas las versiones parten del mismo tablero
-    matriz = crear_matriz_aleatoria(tamano, tamano)
-
-    inicio = time.perf_counter()          
-    for _ in range(generaciones):
-        matriz = siguiente_generacion(matriz)
-    fin = time.perf_counter()
-
-    return fin - inicio
+# Desarrollo Paralelo del programa =============================================================00
 
 
-def ejecutar_benchmark():
-    """Mide el tiempo secuencial para varios tamaños de matriz."""
-    tamanos = [100, 500, 1000]   # Tamaños pedidos en el enunciado
-    generaciones = 5             # Pocas generaciones: 1000x1000 en Python es lento
 
-    print(f"Benchmark secuencial ({generaciones} generaciones por tamaño)")
-    print("-" * 52)
-    print(f"{'Tamaño':>12} | {'Tiempo total (s)':>18} | {'Por generación (s)':>18}")
-    print("-" * 52)
+#****************************** Archivo de ejecucion principal Main ******************************
+if __name__ == '__main__':
 
-    for n in tamanos:
-        total = medir_tiempo(n, generaciones)
-        print(f"{n:>5}x{n:<6} | {total:>18.4f} | {total / generaciones:>18.4f}")
+    # Ejecutamos la aplicacion de dimension M x M
+    # Ejecutar ( M )
+    ejecutar(10)
 
 
-# ======================================================================
-# 4. INTERFAZ GRÁFICA (tkinter)
-# ======================================================================
+    """ 
+    # Apartado de egecuciones genericas en la termianl para testeos
+    m1 = generar_matriz_aleatoria(60)
+    # copiamos la matriz base a la matriz auxiliar
+    m_aux = [fila[:] for fila in m1]
 
-class JuegoDeLaVidaGUI:
-    """Ventana que dibuja la matriz y permite simular el juego."""
+    #iteracion 1:
+    imprimir_matriz(m1)
 
-    def __init__(self, ventana, filas, columnas):
-        self.ventana = ventana
-        self.ventana.title("Juego de la Vida - Versión Secuencial")
-        self.filas = filas
-        self.columnas = columnas
 
-        # Estado del juego
-        self.matriz = crear_matriz_aleatoria(filas, columnas)
-        self.generacion = 0
-        self.corriendo = False       # True mientras la simulación está activa
+    #Ejecucion RAPIDA mediante ciclo for
+    for i in range(1000):
+        print( f"ITERACION ", i)
+        survives_seq(m1, m_aux)
+        revives_seq(m1, m_aux)
+        m1 = [fila[:] for fila in m_aux]
+        imprimir_matriz(m1)
+            
+        
+        print("flip")
 
-        # --- Lienzo donde se dibujan las celdas ---
-        self.canvas = tk.Canvas(
-            ventana,
-            width=columnas * TAM_CELDA,
-            height=filas * TAM_CELDA,
-            bg=COLOR_MUERTA,
-        )
-        self.canvas.pack()
+    #Ejecucion CONTROLADA mediante ciclo while
+    iterador = 0
+    while iterador < 1000:
+        pregunta = input("presione espacio para la siguiente ejecucion")
+        
 
-        # Creamos un rectángulo por celda UNA sola vez y guardamos su id.
-        # Después solo le cambiamos el color (es más rápido que redibujar).
-        self.rectangulos = []
-        for f in range(filas):
-            fila_rects = []
-            for c in range(columnas):
-                x1 = c * TAM_CELDA
-                y1 = f * TAM_CELDA
-                x2 = x1 + TAM_CELDA
-                y2 = y1 + TAM_CELDA
-                rect = self.canvas.create_rectangle(
-                    x1, y1, x2, y2, fill=COLOR_MUERTA, outline="lightgray"
-                )
-                fila_rects.append(rect)
-            self.rectangulos.append(fila_rects)
-
-        # Clic sobre una celda -> cambia su estado (viva/muerta)
-        self.canvas.bind("<Button-1>", self.al_hacer_clic)
-
-        # --- Etiqueta de información ---
-        self.etiqueta = tk.Label(ventana, text="", font=("Arial", 11))
-        self.etiqueta.pack(pady=4)
-
-        # --- Botones ---
-        panel = tk.Frame(ventana)
-        panel.pack(pady=4)
-
-        self.btn_iniciar = tk.Button(panel, text="Iniciar", width=10,
-                                     command=self.alternar_simulacion)
-        self.btn_iniciar.grid(row=0, column=0, padx=3)
-
-        tk.Button(panel, text="Paso", width=10,
-                  command=self.avanzar_un_paso).grid(row=0, column=1, padx=3)
-
-        tk.Button(panel, text="Aleatorio", width=10,
-                  command=self.reiniciar_aleatorio).grid(row=0, column=2, padx=3)
-
-        tk.Button(panel, text="Limpiar", width=10,
-                  command=self.limpiar).grid(row=0, column=3, padx=3)
-
-        self.dibujar()
-
-    # ------------------------------------------------------------------
-    # Dibujo
-    # ------------------------------------------------------------------
-    def dibujar(self, tiempo_calculo=None):
-        """Pinta cada celda según su estado actual."""
-        for f in range(self.filas):
-            for c in range(self.columnas):
-                color = COLOR_VIVA if self.matriz[f][c] == VIVA else COLOR_MUERTA
-                self.canvas.itemconfig(self.rectangulos[f][c], fill=color)
-
-        # Contamos las células vivas sumando todas las filas
-        vivas = sum(sum(fila) for fila in self.matriz)
-        texto = f"Generación: {self.generacion}   |   Células vivas: {vivas}"
-        if tiempo_calculo is not None:
-            texto += f"   |   Cálculo: {tiempo_calculo * 1000:.2f} ms"
-        self.etiqueta.config(text=texto)
-
-    # ------------------------------------------------------------------
-    # Acciones de los botones
-    # ------------------------------------------------------------------
-    def avanzar_un_paso(self):
-        """Calcula y muestra UNA generación (midiendo cuánto tarda)."""
-        inicio = time.perf_counter()
-        self.matriz = siguiente_generacion(self.matriz)
-        tiempo = time.perf_counter() - inicio
-
-        self.generacion += 1
-        self.dibujar(tiempo)
-
-    def alternar_simulacion(self):
-        """Botón Iniciar/Pausar."""
-        self.corriendo = not self.corriendo
-        if self.corriendo:
-            self.btn_iniciar.config(text="Pausar")
-            self.bucle_simulacion()
+        if not pregunta:
+            print(f"ITERACION ", {iterador})
+            survives_seq(m1, m_aux)
+            revives_seq(m1, m_aux)
+            m1 = [fila[:] for fila in m_aux]
+            mostrar_matriz(m1)
         else:
-            self.btn_iniciar.config(text="Iniciar")
-
-    def bucle_simulacion(self):
-        """Avanza una generación y se vuelve a programar mientras esté corriendo."""
-        if self.corriendo:
-            self.avanzar_un_paso()
-            # after() llama a esta misma función dentro de VELOCIDAD_MS milisegundos
-            self.ventana.after(VELOCIDAD_MS, self.bucle_simulacion)
-
-    def reiniciar_aleatorio(self):
-        """Genera un tablero nuevo con células al azar."""
-        self.matriz = crear_matriz_aleatoria(self.filas, self.columnas)
-        self.generacion = 0
-        self.dibujar()
-
-    def limpiar(self):
-        """Deja todas las células muertas (útil para dibujar tus propios patrones)."""
-        self.matriz = crear_matriz_vacia(self.filas, self.columnas)
-        self.generacion = 0
-        self.dibujar()
-
-    def al_hacer_clic(self, evento):
-        """Invierte el estado de la celda donde el usuario hizo clic."""
-        c = evento.x // TAM_CELDA     # Columna = posición x dividida por el tamaño
-        f = evento.y // TAM_CELDA     # Fila = posición y dividida por el tamaño
-        if 0 <= f < self.filas and 0 <= c < self.columnas:
-            self.matriz[f][c] = MUERTA if self.matriz[f][c] == VIVA else VIVA
-            self.dibujar()
-
-
-def iniciar_interfaz():
-    """Crea la ventana principal y arranca la aplicación."""
-    if tk is None:
-        print("tkinter no está disponible en este equipo.")
-        print("Usa el modo benchmark: python vida_secuencial.py benchmark")
-        return
-    ventana = tk.Tk()
-    JuegoDeLaVidaGUI(ventana, FILAS, COLUMNAS)
-    ventana.mainloop()
-
-
-# ======================================================================
-# 5. PUNTO DE ENTRADA
-# ======================================================================
-
-if __name__ == "__main__":
-    # Si se ejecuta con el argumento "benchmark" -> mide tiempos
-    # En cualquier otro caso -> abre la interfaz gráfica
-    if len(sys.argv) > 1 and sys.argv[1] == "benchmark":
-        ejecutar_benchmark()
-    else:
-        iniciar_interfaz()
+            break
+    """
