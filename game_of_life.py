@@ -2,34 +2,30 @@ import random
 # importaciones necesarias para graficacion
 import numpy as np
 import time
-import sys
 import pygame
 # importaciones de threading
 
 
 
-#Funciones generales del programa, que ambas versiones utilizan para su ejecucion.s
+# *************** Funciones generales del programa, que ambas versiones utilizan para su ejecucion ***************
+
+# Funcion de generar matriz aleatoria, se genera de manera tradicional
+# Esta recibe una dimension predeterminada, y genera la matriz con los valores 1 o 0
 def generar_matriz_aleatoria(dim):
-    m = [[random.randint(0,1) # generada con numeros aleatorios entre 1 y 100
+    m = [[random.randint(0,1) 
           for _ in range(dim)] 
           for _ in range(dim)]
     return m
+
+# Funcion imprimir matriz, usada para hacer diversos testeos de correctitud desde la terminal.
+# Recibe una matriz y la imprime de una forma legible.
 def imprimir_matriz(matriz):
     for fila in matriz:
         # Convierte cada número a texto y los une con un espacio
         print(" ".join(map(str, fila)))
 
 
-def siguiente_generacion_seq(m):
-    """Recibe la matriz actual y devuelve la siguiente generación."""
-    m_aux = [fila[:] for fila in m]
-    survives_seq(m, m_aux)
-    revives_seq(m, m_aux)
-    return m_aux
- 
-
-#===================== Interfaz gráfica (pygame) =====================
- 
+#****************************** ImplementacionInterfaz grafica con pygame ******************************
 TAM_VENTANA = 800  # lado en píxeles de la ventana, sin importar el tamaño de la matriz
 COLOR_MUERTA = (18, 18, 18)
 COLOR_VIVA = (0, 230, 118)
@@ -123,7 +119,10 @@ def ejecutar(dim):
     pygame.quit() 
 
 
+# Funcion conteo vecinos, esta dada una matriz m, y unas coordinadas i,j. recorre todos los vecinos proximos a la celda m[i][j]
+# esta realiza un conteo de que numero de vecinos se encuentran vivos al momento de llamarla.
 def conteo_vecinos(m, i, j):
+    #Establecemos un conteo en 0 para poder tener el acumulado de vecinos
     cont = 0
 
     # Ciclos para recorrer los vecinos proximos de caada celula
@@ -132,36 +131,48 @@ def conteo_vecinos(m, i, j):
             # ignoramos la posicion actual (la misma celula no se cuenta)
             if di == 0 and dj == 0:
                 continue  
-            
+
+            # establecemos la coordenada de cada vecino proximo en base a las posiciones dadas i,j
             fila = i + di
             columna = j + dj
 
             # Hacemos validacion para que NO accedamos a posiciones fuera de rango de la matriz
             if 0 <= fila < len(m) and 0 <= columna < len(m):
-                if m[fila][columna] == 1:   
+                if m[fila][columna] == 1: #contamos solo los elementos vivos
                     cont += 1
 
-    return cont
-# implementacion secuencial
+    return cont #devolvemos el conteo que tengamos de vecinos vivos
+
+
+
+
+#****************************** Implementacion secuencial del Problema ******************************
+
+# funcion que revisa para cada elemento de la matriz, si sobrevive o muere en cada iteracion que se llama en base al numero
+# de vecinos a su alrededor, usando conteo_vecinos. Esta recibe una matriz sobre la cual aplica esta logica, y ademas una matriz auxiliar
+# m_aux para ir almacenando el nuevo estado de la partida sin modificar la logica de la iteracion actual.
 def survives_seq(m,m_aux):
     # Recorremos la matriz
     for i in range(len(m)):
         for j in range(len(m)):
             # Conteo de vecinos vivos, llamamos a conteo_vecinos
-            if m[i][j] == 1:
-                vecinos = conteo_vecinos(m,i,j)
-                if vecinos != 2 and vecinos != 3:
-                    m_aux[i][j] = 0
+            if m[i][j] == 1: #primero verificamos que estemos en una celula viva
+                vecinos = conteo_vecinos(m,i,j) # contamos sus vecinos vivos
+                if vecinos != 2 and vecinos != 3: # si no son ni 2 ni 3 se muere.
+                    m_aux[i][j] = 0 #almacenamos este nuevo estado de celda en la matriz auxiliar
             
-
+# Funcion revivir. Esta revisa para cada celula muerta si cuenta con la cantidad exacta de vecinos necesarios para revivir en la proxima 
+# iteracion. Esta recibe una matriz sobre la cual aplica esta logica, y ademas una matriz auxiliar m_aux para ir almacenando el nuevo
+# estado de la partida sin modificar la logica de la iteracion actual.
 def revives_seq(m,m_aux):
+    # Recorremos la matriz
     for i in range(len(m)):
         for j in range(len(m)):
             # Conteo de vecinos vivos, llamamos a conteo_vecinos
-            if m[i][j] == 0:
-                vecinos = conteo_vecinos(m,i,j)
-                if vecinos == 3:
-                    m_aux[i][j] = 1
+            if m[i][j] == 0: # primero verificamos que estemos en una celula muerta
+                vecinos = conteo_vecinos(m,i,j) # contamos sus vecinos vivos
+                if vecinos == 3: # comprobamos que tenga EXACTAMENTE 3 vecinos vivos
+                    m_aux[i][j] = 1 #almacenamos este nuevo estado de la celda en la matriz auxiliar
                         
 
 
@@ -169,47 +180,47 @@ def revives_seq(m,m_aux):
 
 
 
-
-# Archivo de ejecucion principal Main
+#****************************** Archivo de ejecucion principal Main ******************************
 if __name__ == '__main__':
 
-    dim = int(sys.argv[1]) if len(sys.argv) > 1 else 100
-    ejecutar(120)
-    
+    # Ejecutamos la aplicacion de dimension M x M
+    # Ejecutar ( M )
+    ejecutar(10)
+
+
+    """ 
+    # Apartado de egecuciones genericas en la termianl para testeos
     m1 = generar_matriz_aleatoria(60)
     # copiamos la matriz base a la matriz auxiliar
     m_aux = [fila[:] for fila in m1]
 
-    #iteracin 1:
+    #iteracion 1:
     imprimir_matriz(m1)
 
 
-
-"""
-EJECUCIONES GENERICAS EN LA TERMINAL!
-
-PROGRAMA DE EJECUCION RAPIDA
-for i in range(1000):
-    print( f"ITERACION ", i)
-    survives_seq(m1, m_aux)
-    revives_seq(m1, m_aux)
-    m1 = [fila[:] for fila in m_aux]
-    imprimir_matriz(m1)
-        
-     
-    print("flip")
-
-iterador = 0
-while iterador < 1000:
-    pregunta = input("presione espacio para la siguiente ejecucion")
-    
-
-    if not pregunta:
-        print(f"ITERACION ", {iterador})
+    #Ejecucion RAPIDA mediante ciclo for
+    for i in range(1000):
+        print( f"ITERACION ", i)
         survives_seq(m1, m_aux)
         revives_seq(m1, m_aux)
         m1 = [fila[:] for fila in m_aux]
-        mostrar_matriz(m1)
-    else:
-        break
-"""
+        imprimir_matriz(m1)
+            
+        
+        print("flip")
+
+    #Ejecucion CONTROLADA mediante ciclo while
+    iterador = 0
+    while iterador < 1000:
+        pregunta = input("presione espacio para la siguiente ejecucion")
+        
+
+        if not pregunta:
+            print(f"ITERACION ", {iterador})
+            survives_seq(m1, m_aux)
+            revives_seq(m1, m_aux)
+            m1 = [fila[:] for fila in m_aux]
+            mostrar_matriz(m1)
+        else:
+            break
+    """
