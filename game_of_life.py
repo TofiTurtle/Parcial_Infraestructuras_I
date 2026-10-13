@@ -6,6 +6,7 @@ import pygame
 # importaciones de threading
 
 
+# 1. CONFIGURACIÓN 
 
 # *************** Funciones generales del programa, que ambas versiones utilizan para su ejecucion ***************
 
@@ -24,6 +25,7 @@ def imprimir_matriz(matriz):
         # Convierte cada número a texto y los une con un espacio
         print(" ".join(map(str, fila)))
 
+# 2. LÓGICA DEL JUEGO 
 
 #****************************** ImplementacionInterfaz grafica con pygame ******************************
 TAM_VENTANA = 800  # lado en píxeles de la ventana, sin importar el tamaño de la matriz
