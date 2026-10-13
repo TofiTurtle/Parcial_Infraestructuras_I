@@ -1,19 +1,23 @@
-
 # JUEGO DE LA VIDA DE CONWAY
+# Implementación secuencial + paralela (multiprocessing) + interfaz gráfica con Pygame
 
 # ============================================================
 # 1. CONFIGURACIÓN DEL PROGRAMA
 DIMENSION_MATRIZ = 100       # Tamaño de la matriz: DIMENSION x DIMENSION
-TAM_VENTANA = 700        # Tamaño de la ventana en píxeles
+MODO = "paralelo"            # "secuencial" o "paralelo"
+NUM_PROCESOS = 4             # Número de procesos (solo se usa en modo paralelo)
+TAM_VENTANA = 700            # Tamaño de la ventana en píxeles
 COLOR_MUERTA = (18, 18, 18)
-COLOR_VIVA = (0, 230, 118) 
-RETARDO_REPETICION = 0.3    # Segundos antes de comenzar el avance continuo
-INTERVALO_REPETICION = 0.05 # Tiempo mínimo entre generaciones
-FPS =60
+COLOR_VIVA = (0, 230, 118)
+RETARDO_REPETICION = 0.3     # Segundos antes de comenzar el avance continuo
+INTERVALO_REPETICION = 0.05  # Tiempo mínimo entre generaciones
+FPS = 60
+
 # ============================================================
 # 2. IMPORTACIONES
 import random
 import time
+from multiprocessing import Pool
 import numpy as np
 import pygame
 
@@ -31,6 +35,7 @@ PALETA = np.array(
     [COLOR_MUERTA, COLOR_VIVA],
     dtype=np.uint8
 )
+
 # ============================================================
 # 4. FUNCIONES GENERALES
 
@@ -108,71 +113,127 @@ def conteo_vecinos(m, i, j):
     return cont
 
 
+def calcular_filas(m, inicio, fin):
+    """
+    Calcula la siguiente generación SOLO de las filas
+    [inicio, fin) y devuelve esas filas ya calculadas.
+
+    Esta función es la que comparten la versión secuencial
+    y la paralela, así la comparación de tiempos es justa.
+
+    No modifica la matriz m: solo la lee. Por eso varios
+    procesos pueden trabajar al tiempo sin condiciones de carrera.
+    """
+
+    filas_nuevas = []
+
+    for i in range(inicio, fin):
+
+        fila_nueva = []
+
+        for j in range(len(m)):
+
+            vecinos = conteo_vecinos(m, i, j)
+
+            # Célula viva: sobrevive solo con 2 o 3 vecinos
+            if m[i][j] == 1:
+                if vecinos == 2 or vecinos == 3:
+                    fila_nueva.append(1)
+                else:
+                    fila_nueva.append(0)
+
+            # Célula muerta: revive solo con exactamente 3 vecinos
+            else:
+                if vecinos == 3:
+                    fila_nueva.append(1)
+                else:
+                    fila_nueva.append(0)
+
+        filas_nuevas.append(fila_nueva)
+
+    return filas_nuevas
+
+
 # ============================================================
 # 6. IMPLEMENTACIÓN SECUENCIAL
 
-
-def survives_seq(m, m_aux):
+def siguiente_generacion_seq(m):
     """
-    Revisa las células actualmente vivas.
-
-    Regla del Juego de la Vida:
-    Una célula viva sobrevive si tiene 2 o 3 vecinos vivos.
+    Calcula una generación completa del Juego de la Vida
+    con un solo proceso: procesa todas las filas de una vez.
     """
 
-    for i in range(len(m)):
-        for j in range(len(m)):
-
-            # Comprobamos si la célula está viva
-            if m[i][j] == 1:
-
-                vecinos = conteo_vecinos(m, i, j)
-
-                # Si no tiene 2 ni 3 vecinos, muere
-                if vecinos != 2 and vecinos != 3:
-                    m_aux[i][j] = 0
-
-
-def revives_seq(m, m_aux):
-    """
-    Revisa las células actualmente muertas.
-
-    Regla del Juego de la Vida:
-    Una célula muerta revive si tiene exactamente 3
-    vecinos vivos.
-    """
-
-    for i in range(len(m)):
-        for j in range(len(m)):
-
-            # Comprobamos si la célula está muerta
-            if m[i][j] == 0:
-
-                vecinos = conteo_vecinos(m, i, j)
-
-                # Si tiene exactamente 3 vecinos, revive
-                if vecinos == 3:
-                    m_aux[i][j] = 1
-
-
-def siguiente_generacion(m, m_aux):
-    """
-    Calcula una generación completa del Juego de la Vida.
-
-    Primero se procesan las células vivas y después
-    las células muertas.
-    """
-
-    survives_seq(m, m_aux)
-    revives_seq(m, m_aux)
-
-    # La matriz auxiliar pasa a ser la nueva generación
-    return copiar_matriz(m_aux)
+    return calcular_filas(m, 0, len(m))
 
 
 # ============================================================
-# 7. FUNCIONES DE LA INTERFAZ GRÁFICA
+# 7. IMPLEMENTACIÓN PARALELA (multiprocessing)
+
+def dividir_filas(n, num_procesos):
+    """
+    Divide n filas en num_procesos bloques de filas seguidas.
+
+    Devuelve una lista de tuplas (inicio, fin). Si n no se
+    reparte exacto, los primeros bloques reciben una fila extra.
+    Ejemplo: dividir_filas(10, 3) -> [(0, 4), (4, 7), (7, 10)]
+    """
+
+    base = n // num_procesos
+    sobrantes = n % num_procesos
+
+    rangos = []
+    inicio = 0
+
+    for k in range(num_procesos):
+        fin = inicio + base
+        if k < sobrantes:
+            fin += 1
+        rangos.append((inicio, fin))
+        inicio = fin
+
+    return rangos
+
+
+def trabajador(tarea):
+    """
+    Función que ejecuta cada proceso trabajador.
+
+    Recibe una tupla (m, inicio, fin) y calcula su bloque de filas.
+    """
+
+    m, inicio, fin = tarea
+    return calcular_filas(m, inicio, fin)
+
+
+def siguiente_generacion_par(m, pool, num_procesos):
+    """
+    Calcula una generación completa repartiendo las filas
+    entre varios procesos.
+
+    Cada proceso recibe la generación actual (solo lectura) y
+    calcula su bloque de filas. pool.map espera a que TODOS
+    terminen antes de continuar (funciona como una barrera),
+    y recién ahí se unen los bloques en la nueva matriz.
+    """
+
+    rangos = dividir_filas(len(m), num_procesos)
+
+    # Una tarea por proceso: la matriz y su rango de filas
+    tareas = [(m, inicio, fin) for inicio, fin in rangos]
+
+    # Aquí se reparte el trabajo y se espera a todos (barrera)
+    bloques = pool.map(trabajador, tareas)
+
+    # Unimos los bloques en orden para formar la nueva matriz
+    nueva = []
+    for bloque in bloques:
+        nueva.extend(bloque)
+
+    return nueva
+
+
 # ============================================================
+# 8. FUNCIONES DE LA INTERFAZ GRÁFICA
 
 def matriz_a_superficie(m):
     """
@@ -200,13 +261,13 @@ def matriz_a_superficie(m):
     return superficie
 
 
-def crear_titulo(dim, generacion, tiempo_calculo=None):
+def crear_titulo(dim, generacion, modo, tiempo_calculo=None):
     """
     Crea el texto que aparecerá en el título de la ventana.
     """
 
     texto = (
-        f"La vida {dim}x{dim} "
+        f"La vida {dim}x{dim} ({modo}) "
         f"- Generación {generacion}"
         f" | Espacio/Enter: avanzar"
         f" | Esc: salir"
@@ -219,29 +280,35 @@ def crear_titulo(dim, generacion, tiempo_calculo=None):
 
 
 # ============================================================
-# 8. EJECUCIÓN DEL JUEGO
+# 9. EJECUCIÓN DEL JUEGO
 
-def ejecutar(dim):
+def ejecutar(dim, modo, num_procesos):
     """
     Ejecuta el Juego de la Vida utilizando Pygame.
+
+    modo puede ser "secuencial" o "paralelo".
     """
 
-    print(f"Generando matriz {dim}x{dim}...")
+    print(f"Generando matriz {dim}x{dim} en modo {modo}...")
 
     # --------------------------------------------------------
     # Crear matriz inicial
 
     matriz_actual = generar_matriz_aleatoria(dim)
 
-    # Matriz auxiliar para almacenar la siguiente generación
-    matriz_auxiliar = copiar_matriz(matriz_actual)
-
     generacion = 1
 
+    # --------------------------------------------------------
+    # Crear los procesos trabajadores (solo en modo paralelo)
+    # Se crean una sola vez y se reutilizan en cada generación
+
+    pool = None
+
+    if modo == "paralelo":
+        pool = Pool(processes=num_procesos)
 
     # --------------------------------------------------------
     # Inicializar Pygame
-    
 
     pygame.init()
 
@@ -251,7 +318,6 @@ def ejecutar(dim):
 
     reloj = pygame.time.Clock()
 
-
     # --------------------------------------------------------
     # Preparar primera imagen
     # --------------------------------------------------------
@@ -259,9 +325,8 @@ def ejecutar(dim):
     imagen = matriz_a_superficie(matriz_actual)
 
     pygame.display.set_caption(
-        crear_titulo(dim, generacion)
+        crear_titulo(dim, generacion, modo)
     )
-
 
     # --------------------------------------------------------
     # Variables para controlar las teclas
@@ -270,7 +335,6 @@ def ejecutar(dim):
     t_ultimo_paso = 0.0
 
     corriendo = True
-
 
     # ========================================================
     # BUCLE PRINCIPAL
@@ -281,7 +345,6 @@ def ejecutar(dim):
 
         avanzar = False
 
-
         # ----------------------------------------------------
         # Revisar eventos de Pygame
 
@@ -290,7 +353,6 @@ def ejecutar(dim):
             # Cerrar la ventana
             if evento.type == pygame.QUIT:
                 corriendo = False
-
 
             # Detectar teclas
             elif evento.type == pygame.KEYDOWN:
@@ -305,7 +367,6 @@ def ejecutar(dim):
                     avanzar = True
 
                     t_inicio_pulsacion = ahora
-
 
         # ----------------------------------------------------
         # Detectar si la tecla sigue presionada
@@ -348,11 +409,17 @@ def ejecutar(dim):
             # Medir tiempo del cálculo
             t0 = time.perf_counter()
 
-            # Calcular siguiente generación
-            matriz_actual = siguiente_generacion(
-                matriz_actual,
-                matriz_auxiliar
-            )
+            # Calcular siguiente generación según el modo elegido
+            if modo == "paralelo":
+                matriz_actual = siguiente_generacion_par(
+                    matriz_actual,
+                    pool,
+                    num_procesos
+                )
+            else:
+                matriz_actual = siguiente_generacion_seq(
+                    matriz_actual
+                )
 
             # Tiempo empleado
             tiempo_calculo = (
@@ -367,20 +434,18 @@ def ejecutar(dim):
                 matriz_actual
             )
 
-
             # Actualizar título
             pygame.display.set_caption(
                 crear_titulo(
                     dim,
                     generacion,
+                    modo,
                     tiempo_calculo
                 )
             )
 
-
             # Registrar momento del último cálculo
             t_ultimo_paso = time.perf_counter()
-
 
         # ----------------------------------------------------
         # Dibujar imagen
@@ -392,19 +457,22 @@ def ejecutar(dim):
 
         pygame.display.flip()
 
-
         # Controlar FPS
         reloj.tick(FPS)
 
-
     # --------------------------------------------------------
-    # Cerrar Pygame
+    # Cerrar procesos y Pygame
+
+    if pool is not None:
+        pool.close()
+        pool.join()
+
     pygame.quit()
 
 
 # ============================================================
-# 9. PROGRAMA PRINCIPAL
+# 10. PROGRAMA PRINCIPAL
 
 if __name__ == '__main__':
 
-    ejecutar(DIMENSION_MATRIZ)
+    ejecutar(DIMENSION_MATRIZ, MODO, NUM_PROCESOS)
