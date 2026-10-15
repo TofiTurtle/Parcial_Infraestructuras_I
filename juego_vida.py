@@ -1,11 +1,10 @@
 # JUEGO DE LA VIDA DE CONWAY
-# Implementación secuencial + paralela (multiprocessing) + interfaz gráfica con Pygame
+# Implementación secuencial + paralela con MPI (mpi4py) + interfaz gráfica con Pygame
 
 # ============================================================
 # 1. CONFIGURACIÓN DEL PROGRAMA
 DIMENSION_MATRIZ = 100       # Tamaño de la matriz: DIMENSION x DIMENSION
-MODO = "paralelo"            # "secuencial" o "paralelo"
-NUM_PROCESOS = 4             # Número de procesos (solo se usa en modo paralelo)
+MODO = "mpi"                 # "secuencial" o "mpi"  (el número de procesos lo da mpiexec -n)
 TAM_VENTANA = 700            # Tamaño de la ventana en píxeles
 COLOR_MUERTA = (18, 18, 18)
 COLOR_VIVA = (0, 230, 118)
@@ -17,9 +16,13 @@ FPS = 60
 # 2. IMPORTACIONES
 import random
 import time
-from multiprocessing import Pool
 import numpy as np
 import pygame
+from mpi4py import MPI # Implementacion escogida de las alternativas dadas: MPI
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()       # identificador de este proceso (0 .. size-1)
+size = comm.Get_size()       # número total de procesos MPI
 
 # ============================================================
 # 3. CONFIGURACIÓN DEPENDIENTE DE PYGAME
@@ -77,7 +80,7 @@ def copiar_matriz(matriz):
 
 
 # ============================================================
-# 5. LÓGICA DEL JUEGO
+# 5. LOGICA DEL JUEGO
 
 def conteo_vecinos(m, i, j):
     """
@@ -87,6 +90,7 @@ def conteo_vecinos(m, i, j):
     Una célula puede tener como máximo 8 vecinos.
     """
 
+    #inicializamo el contador en 0
     cont = 0
 
     # Recorremos las posiciones vecinas
@@ -167,7 +171,7 @@ def siguiente_generacion_seq(m):
 
 
 # ============================================================
-# 7. IMPLEMENTACIÓN PARALELA (multiprocessing)
+# 7. IMPLEMENTACIÓN PARALELA (MPI*** ojo vivisimo)
 
 def dividir_filas(n, num_procesos):
     """
@@ -194,37 +198,34 @@ def dividir_filas(n, num_procesos):
     return rangos
 
 
-def trabajador(tarea):
+def calcular_y_reunir(m):
     """
-    Función que ejecuta cada proceso trabajador.
+    Parte que ejecutan TODOS los procesos (rank 0 incluido):
+    cada uno calcula su bloque de filas y lo envía al rank 0.
 
-    Recibe una tupla (m, inicio, fin) y calcula su bloque de filas.
+    comm.gather funciona como barrera hacia el rank 0: no devuelve
+    hasta que llegaron los bloques de todos los procesos, y los
+    entrega ordenados por rank (así quedan en su posición correcta).
+    Devuelve la lista de bloques en rank 0 y None en los demás.
     """
+    inicio, fin = dividir_filas(len(m), size)[rank]
+    bloque = calcular_filas(m, inicio, fin)
+    return comm.gather(bloque, root=0)
 
-    m, inicio, fin = tarea
-    return calcular_filas(m, inicio, fin)
 
-
-def siguiente_generacion_par(m, pool, num_procesos):
+def siguiente_generacion_mpi(m):
     """
-    Calcula una generación completa repartiendo las filas
-    entre varios procesos.
+    Una generación completa. SOLO la llama el rank 0.
 
-    Cada proceso recibe la generación actual (solo lectura) y
-    calcula su bloque de filas. pool.map espera a que TODOS
-    terminen antes de continuar (funciona como una barrera),
-    y recién ahí se unen los bloques en la nueva matriz.
+    1. bcast: el rank 0 envía la matriz actual a todos los procesos
+       (los demás están esperando en bucle_trabajador).
+    2. Todos calculan su bloque y lo reúnen con gather.
+    3. El rank 0 une los bloques en orden.
     """
+    comm.bcast(m, root=0)
 
-    rangos = dividir_filas(len(m), num_procesos)
+    bloques = calcular_y_reunir(m)
 
-    # Una tarea por proceso: la matriz y su rango de filas
-    tareas = [(m, inicio, fin) for inicio, fin in rangos]
-
-    # Aquí se reparte el trabajo y se espera a todos (barrera)
-    bloques = pool.map(trabajador, tareas)
-
-    # Unimos los bloques en orden para formar la nueva matriz
     nueva = []
     for bloque in bloques:
         nueva.extend(bloque)
@@ -232,8 +233,23 @@ def siguiente_generacion_par(m, pool, num_procesos):
     return nueva
 
 
+def bucle_trabajador():
+    """
+    Lo ejecutan los procesos con rank > 0 mientras el rank 0
+    maneja la interfaz. Esperan una matriz, calculan su bloque
+    y lo devuelven. Una matriz None es la orden de terminar.
+    """
+    while True:
+        m = comm.bcast(None, root=0)
+
+        if m is None:
+            break
+
+        calcular_y_reunir(m)
+
+
 # ============================================================
-# 8. FUNCIONES DE LA INTERFAZ GRÁFICA
+# 8. FUNCIONES DE LA INTERFAZ GRÁFICA (solo rank 0)
 
 def matriz_a_superficie(m):
     """
@@ -265,9 +281,11 @@ def crear_titulo(dim, generacion, modo, tiempo_calculo=None):
     """
     Crea el texto que aparecerá en el título de la ventana.
     """
+    # Ahora decimos con cuantos procesos tamos ejecutandolo desde la terminal siuuuu
+    detalle = f"mpi, {size} procesos" if modo == "mpi" else modo
 
     texto = (
-        f"La vida {dim}x{dim} ({modo}) "
+        f"La vida {dim}x{dim} ({detalle}) "
         f"- Generación {generacion}"
         f" | Espacio/Enter: avanzar"
         f" | Esc: salir"
@@ -280,16 +298,16 @@ def crear_titulo(dim, generacion, modo, tiempo_calculo=None):
 
 
 # ============================================================
-# 9. EJECUCIÓN DEL JUEGO
+# 9. EJECUCIÓN DEL JUEGO (solo rank 0, es decir interfaz jeje)
 
-def ejecutar(dim, modo, num_procesos):
+def ejecutar(dim, modo):
     """
     Ejecuta el Juego de la Vida utilizando Pygame.
 
-    modo puede ser "secuencial" o "paralelo".
+    modo puede ser "secuencial" o "mpi".
     """
 
-    print(f"Generando matriz {dim}x{dim} en modo {modo}...")
+    print(f"Generando matriz {dim}x{dim} en modo {modo} ({size} procesos)...")
 
     # --------------------------------------------------------
     # Crear matriz inicial
@@ -298,17 +316,6 @@ def ejecutar(dim, modo, num_procesos):
 
     generacion = 1
 
-    # --------------------------------------------------------
-    # Crear los procesos trabajadores (solo en modo paralelo)
-    # Se crean una sola vez y se reutilizan en cada generación
-
-    pool = None
-
-    if modo == "paralelo":
-        pool = Pool(processes=num_procesos)
-
-    # --------------------------------------------------------
-    # Inicializar Pygame
 
     pygame.init()
 
@@ -347,7 +354,7 @@ def ejecutar(dim, modo, num_procesos):
 
         # ----------------------------------------------------
         # Revisar eventos de Pygame
-
+        
         for evento in pygame.event.get():
 
             # Cerrar la ventana
@@ -370,7 +377,7 @@ def ejecutar(dim, modo, num_procesos):
 
         # ----------------------------------------------------
         # Detectar si la tecla sigue presionada
-
+        
         if not avanzar:
 
             teclas = pygame.key.get_pressed()
@@ -409,17 +416,10 @@ def ejecutar(dim, modo, num_procesos):
             # Medir tiempo del cálculo
             t0 = time.perf_counter()
 
-            # Calcular siguiente generación según el modo elegido
-            if modo == "paralelo":
-                matriz_actual = siguiente_generacion_par(
-                    matriz_actual,
-                    pool,
-                    num_procesos
-                )
+            if modo == "mpi":
+                matriz_actual = siguiente_generacion_mpi(matriz_actual)
             else:
-                matriz_actual = siguiente_generacion_seq(
-                    matriz_actual
-                )
+                matriz_actual = siguiente_generacion_seq(matriz_actual)
 
             # Tiempo empleado
             tiempo_calculo = (
@@ -461,12 +461,7 @@ def ejecutar(dim, modo, num_procesos):
         reloj.tick(FPS)
 
     # --------------------------------------------------------
-    # Cerrar procesos y Pygame
-
-    if pool is not None:
-        pool.close()
-        pool.join()
-
+    # Cerrar Pygame
     pygame.quit()
 
 
@@ -475,4 +470,11 @@ def ejecutar(dim, modo, num_procesos):
 
 if __name__ == '__main__':
 
-    ejecutar(DIMENSION_MATRIZ, MODO, NUM_PROCESOS)
+    if rank == 0:
+        try:
+            ejecutar(DIMENSION_MATRIZ, MODO)
+        finally:
+            # Orden de terminar para los demás procesos (siempre, incluso si hay error)
+            comm.bcast(None, root=0)
+    else:
+        bucle_trabajador()
